@@ -1,0 +1,147 @@
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script src="jscolor.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@0.12.0"> </script>
+<script type="text/javascript">
+let labelList = [
+	'red-ish',
+	'green-ish',
+	'blue-ish',
+	'orange-ish',
+	'yellow-ish',
+	'pink-ish',
+	'purple-ish',
+	'brown-ish',
+	'grey-ish'
+];
+
+var graphData = {
+	x: [],
+	y: [],
+	type: 'scatter'
+};
+
+function loadJSON(fileUrl) {
+	var xobj = new XMLHttpRequest();
+	xobj.overrideMimeType("application/json");
+	xobj.open('GET', fileUrl, true);
+	var promise = new Promise(function(resolve, reject) {
+		xobj.onreadystatechange = function () {
+			if (xobj.readyState == 4 && xobj.status == "200") {
+				resolve(xobj.responseText);
+			}
+		};
+	});
+	xobj.send(null);
+
+	return promise;
+}
+
+function prepareData(colorData) {
+	let data = {
+		input: [],
+		output: []
+	};
+	const json = JSON.parse(colorData);
+	let i = 0;
+	console.log(labelList.join(', '));
+	json.entries.map(item => {
+		if (i < 10) {
+			i++;
+			console.log(
+				'%c ' + item.label + ' ' + labelList.indexOf(item.label),  
+				'background-color: rgb(' + item.r + ',' + item.g + ',' + item.b + ')'
+			);
+		}
+		data.input.push([item.r / 255, item.g / 255, item.b / 255]);
+		data.output.push(labelList.indexOf(item.label));
+	});
+	return data;
+}
+
+function createModel() {
+	let model = tf.sequential();
+	model.add(tf.layers.dense({
+		inputShape: [3],
+		units: 15,
+		activation: 'sigmoid'
+	}));
+	model.add(tf.layers.dense({
+		units: 9,
+		activation: 'softmax'
+	}));
+
+	model.compile({
+		loss: 'categoricalCrossentropy',
+		optimizer: tf.train.sgd(0.25),
+		metrics: ['accuracy']
+	});
+	return model;
+}
+
+function train(model, xs, ys) {
+	return model.fit(xs, ys, {
+		epochs: 20, shuffle: true, validationSplit: 0.5,
+		callbacks: {
+			onTrainBegin: (a) => {
+				//console.log(a);
+				Plotly.plot('myDiv', [graphData]);
+			},
+			onBatchEnd: (epochNum, result) => {
+				return tf.nextFrame();
+			},
+			onEpochEnd: async (epochNum, result) => {
+				Plotly.extendTraces('myDiv', {
+					x: [[epochNum]],
+					y: [[result.val_loss]]
+				}, [0]);
+			},
+			onTrainEnd: (a) => {
+				//console.log(a);
+				console.log(a);
+			}
+		}
+	});
+}
+
+function predict(model, r, g, b) {
+	var t = model.predict(tf.tensor2d([[r / 255, g / 255, b / 255]]));
+	t.print();
+	var index = t.argMax(1).dataSync()[0];
+	console.log(index);
+	console.log('%c' + labelList[index],
+		'background-color: rgb(' + r + ',' + g + ',' + b + ')');
+	return labelList[index];
+}
+
+const model = createModel();
+
+loadJSON('colorData.json').then((txt) => {
+	const data = prepareData(txt);
+	let xs = tf.tensor2d(data.input);
+	let ys = tf.oneHot(
+		tf.tensor1d(data.output, 'int32'),
+		9
+	).cast('float32');
+
+	train(model, xs, ys).then(result => {
+		predict(model, 255, 0, 0);
+	});
+});
+
+function update(picker) {
+	var r = Math.round(picker.rgb[0]);
+	var g = Math.round(picker.rgb[1]);
+	var b = Math.round(picker.rgb[2]);
+
+	var result = predict(model, r, g, b);
+	var div = document.getElementById("predictionResult");
+	div.innerHTML = result
+	div.style.backgroundColor = "rgb(" + r + ", " + g + ", " + b + ")";
+}
+</script>
+
+<div id="myDiv">
+	<!-- Plotly chart will be drawn inside this DIV -->
+</div>
+
+<input class="jscolor {onFineChange:'update(this)'}" value="ffcc00"><span id="predictionResult"></span>
